@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+
+set -u
+
+shellops_source="${BASH_SOURCE[0]}"
+while [[ -L "$shellops_source" ]]; do
+  shellops_source_dir="$(cd -P "$(dirname "$shellops_source")" && pwd)"
+  shellops_source="$(readlink "$shellops_source")"
+  [[ "$shellops_source" == /* ]] || shellops_source="$shellops_source_dir/$shellops_source"
+done
+SHELLOPS_ROOT="$(cd -P "$(dirname "$shellops_source")/.." && pwd)"
+export SHELLOPS_ROOT
+unset shellops_source shellops_source_dir
+
+source "$SHELLOPS_ROOT/lib/common.sh"
+source "$SHELLOPS_ROOT/lib/dependencies.sh"
+source "$SHELLOPS_ROOT/modules/system.sh"
+source "$SHELLOPS_ROOT/modules/performance.sh"
+source "$SHELLOPS_ROOT/modules/services.sh"
+source "$SHELLOPS_ROOT/modules/network.sh"
+source "$SHELLOPS_ROOT/modules/docker.sh"
+source "$SHELLOPS_ROOT/modules/health.sh"
+source "$SHELLOPS_ROOT/modules/certificates.sh"
+source "$SHELLOPS_ROOT/modules/reports.sh"
+source "$SHELLOPS_ROOT/modules/tasy.sh"
+
+shellops_require_command dialog "A interface requer o pacote 'dialog'." || exit 1
+
+source "$SHELLOPS_ROOT/tui/main.sh"
+shellops_tui_main

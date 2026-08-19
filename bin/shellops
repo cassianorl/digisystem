@@ -14,6 +14,7 @@ unset shellops_source shellops_source_dir
 
 source "$SHELLOPS_ROOT/lib/common.sh"
 source "$SHELLOPS_ROOT/lib/dependencies.sh"
+source "$SHELLOPS_ROOT/lib/reporting.sh"
 source "$SHELLOPS_ROOT/modules/system.sh"
 source "$SHELLOPS_ROOT/modules/performance.sh"
 source "$SHELLOPS_ROOT/modules/services.sh"

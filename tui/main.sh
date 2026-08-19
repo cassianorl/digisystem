@@ -14,7 +14,7 @@ shellops_tui_show_output() {
   local title="$1"
   shift
 
-  local output_file status
+  local output_file status dialog_status report_path report_result
   output_file="$(mktemp)" || return 1
   SHELLOPS_TUI_TEMP_FILES+=("$output_file")
 
@@ -28,7 +28,19 @@ shellops_tui_show_output() {
     printf 'Comando finalizado sem saída.\n' >"$output_file"
   fi
 
-  dialog --title "$title" --exit-label "Voltar" --textbox "$output_file" 22 100
+  dialog --title "$title" --exit-label "Voltar" \
+    --extra-button --extra-label "Gerar HTML" --textbox "$output_file" 22 100
+  dialog_status=$?
+
+  if [[ "$dialog_status" -eq 3 ]]; then
+    report_path="$(shellops_report_default_path "$title")"
+    if report_result="$(shellops_generate_html_report "$title" "$output_file" "$report_path" "$status" 2>&1)"; then
+      dialog --title "Relatório HTML gerado" --msgbox \
+        "Relatório salvo em:\n\n$report_result" 10 90
+    else
+      dialog --title "Falha ao gerar relatório" --msgbox "$report_result" 10 90
+    fi
+  fi
   rm -f -- "$output_file"
   return "$status"
 }

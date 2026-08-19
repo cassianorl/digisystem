@@ -33,6 +33,17 @@ shellops_tui_show_output() {
   return "$status"
 }
 
+shellops_tui_show_program_output() {
+  local title="$1"
+  shift
+
+  local status
+  "$@" 2>&1 | dialog --title "$title" --exit-label "Voltar" \
+    --programbox "A execução está em andamento. Aguarde a conclusão." 24 100
+  status=${PIPESTATUS[0]}
+  return "$status"
+}
+
 shellops_tui_select_file() {
   local title="$1"
   local start_path="${2:-$PWD/}"
@@ -63,61 +74,16 @@ shellops_tui_reports() {
     reports_performance_check "$log_file" "$threshold" || true
 }
 
-shellops_tui_docker() {
-  local option container lines
-
-  while true; do
-    option="$(dialog --stdout --title "Docker - somente leitura" --menu \
-      "Escolha uma operação:" 18 82 8 \
-      1 "Listar containers" \
-      2 "Stats atuais" \
-      3 "Logs de um container" \
-      4 "Inspect de um container" \
-      5 "Status e healthcheck" \
-      0 "Voltar")" || return 0
-
-    case "$option" in
-      1) shellops_tui_show_output "Containers Docker" docker_list_containers || true ;;
-      2) shellops_tui_show_output "Docker stats" docker_show_stats || true ;;
-      3)
-        container="$(shellops_tui_container_name)" || continue
-        [[ -n "$container" ]] || continue
-        lines="$(dialog --stdout --title "Docker logs" --inputbox "Quantidade de linhas:" 8 60 "200")" || continue
-        [[ -n "$lines" ]] || continue
-        shellops_tui_show_output "Logs: $container" docker_show_logs "$container" "$lines" || true
-        ;;
-      4)
-        container="$(shellops_tui_container_name)" || continue
-        [[ -n "$container" ]] || continue
-        shellops_tui_show_output "Inspect: $container" docker_inspect_container "$container" || true
-        ;;
-      5)
-        container="$(shellops_tui_container_name)" || continue
-        [[ -n "$container" ]] || continue
-        shellops_tui_show_output "Health: $container" docker_show_health "$container" || true
-        ;;
-      0) return 0 ;;
-    esac
-  done
-}
-
 shellops_tui_tasy_monitor() {
   dialog --title "Monitor de startup TASY" --yesno \
     "Esta opção reutiliza o monitor existente. Ela requer root, aguarda um container tasy-tasyappserver-* ficar healthy e grava a coleta em /root. Deseja continuar?" \
     11 82 || return 0
 
-  local status
-  clear
-  tasy_monitor_startup
-  status=$?
-  printf '\nMonitor finalizado com código %d. Pressione ENTER para retornar à TUI.\n' "$status"
-  read -r
-}
-
-shellops_tui_unavailable() {
-  dialog --title "Indisponível" --msgbox \
-    "Operações de instalação e manutenção de risco estão em refatoração e não podem ser executadas nesta versão." \
-    9 76
+  if ! shellops_tui_show_program_output "Monitor de startup TASY" tasy_monitor_startup; then
+    dialog --title "Monitor de startup TASY" --msgbox \
+      "O monitor foi encerrado com erro. Consulte a saída apresentada para identificar a causa." \
+      9 78
+  fi
 }
 
 shellops_tui_system() {
@@ -195,34 +161,6 @@ shellops_tui_performance_sampled() {
   parameters="$(shellops_tui_sampling_parameters)" || return 0
   read -r interval samples <<< "$parameters"
   shellops_tui_show_output "$title" "$function_name" "$interval" "$samples" || true
-}
-
-shellops_tui_performance() {
-  local option
-  while true; do
-    option="$(dialog --stdout --title "Performance - somente leitura" --menu \
-      "Escolha uma coleta:" 22 88 11 \
-      1 "Visão geral de performance" \
-      2 "CPU por intervalo" \
-      3 "Memória / VMStat" \
-      4 "I/O de discos" \
-      5 "Processos por CPU" \
-      6 "Processos por I/O" \
-      7 "Histórico SAR" \
-      8 "Disponibilidade do sysstat" \
-      9 "Voltar")" || return 0
-    case "$option" in
-      1) shellops_tui_show_output "Visão geral de performance" performance_overview || true ;;
-      2) shellops_tui_performance_sampled "CPU por intervalo" performance_cpu_interval ;;
-      3) shellops_tui_performance_sampled "Memória / VMStat" performance_vmstat_interval ;;
-      4) shellops_tui_performance_sampled "I/O de discos" performance_disk_io ;;
-      5) shellops_tui_performance_sampled "Processos por CPU" performance_process_cpu ;;
-      6) shellops_tui_performance_sampled "Processos por I/O" performance_process_io ;;
-      7) shellops_tui_performance_history ;;
-      8) shellops_tui_show_output "Disponibilidade do sysstat" performance_sysstat_status || true ;;
-      9) return 0 ;;
-    esac
-  done
 }
 
 shellops_tui_service_unit() {
@@ -316,34 +254,6 @@ shellops_tui_services_kernel() {
   IFS='|' read -r since until <<< "$values"
   lines="$(shellops_tui_journal_lines)" || return 0
   shellops_tui_show_output "Mensagens do kernel" services_kernel_messages "$since" "$lines" || true
-}
-
-shellops_tui_services() {
-  local option
-  while true; do
-    option="$(dialog --stdout --title "Serviços e Logs - somente leitura" --menu \
-      "Escolha uma consulta:" 22 88 11 \
-      1 "Serviços com falha" \
-      2 "Status de um serviço" \
-      3 "Serviços em execução" \
-      4 "Serviços habilitados" \
-      5 "Journal de um serviço" \
-      6 "Journal por período" \
-      7 "Erros recentes do sistema" \
-      8 "Mensagens do kernel" \
-      9 "Voltar")" || return 0
-    case "$option" in
-      1) shellops_tui_show_output "Serviços com falha" services_failed || true ;;
-      2) shellops_tui_services_status ;;
-      3) shellops_tui_show_output "Serviços em execução" services_running || true ;;
-      4) shellops_tui_show_output "Serviços habilitados" services_enabled || true ;;
-      5) shellops_tui_services_journal ;;
-      6) shellops_tui_services_period ;;
-      7) shellops_tui_services_recent ;;
-      8) shellops_tui_services_kernel ;;
-      9) return 0 ;;
-    esac
-  done
 }
 
 shellops_tui_network_target() {
@@ -453,27 +363,255 @@ shellops_tui_network_stats() {
     network_interface_stats "$interface" "$include_ethtool" || true
 }
 
-shellops_tui_network() {
+shellops_tui_utilities_menu() {
   local option
+
   while true; do
-    option="$(dialog --stdout --title "Rede - somente leitura" --menu \
-      "Escolha uma consulta:" 24 88 13 \
-      1 "Resumo de rede" 2 "Interfaces" 3 "Rotas" 4 "DNS" \
-      5 "Portas e sockets" 6 "Conectividade ICMP" 7 "Conectividade TCP" \
-      8 "Rota até destino" 9 "ARP / Neighbor table" \
-      10 "Estatísticas de interfaces" 11 "Voltar")" || return 0
+    option="$(dialog --stdout --title "Utilitários" --menu \
+      "Ferramentas para tarefas específicas" 17 88 7 \
+      1 "Validar certificado PEM" \
+      2 "Analisar performance de relatórios" \
+      3 "Monitorar startup do TASY AppServer [gera coleta]" \
+      0 "Voltar")" || return 0
+
+    case "$option" in
+      1) shellops_tui_certificates ;;
+      2) shellops_tui_reports ;;
+      3) shellops_tui_tasy_monitor ;;
+      0) return 0 ;;
+    esac
+  done
+}
+
+shellops_tui_diagnostics_performance() {
+  local option
+
+  while true; do
+    option="$(dialog --stdout --title "Diagnósticos - Performance" --menu \
+      "Coletas e amostragens para investigação" 20 88 9 \
+      1 "Visão geral de performance" \
+      2 "CPU por intervalo" \
+      3 "Memória / VMStat" \
+      4 "I/O de discos" \
+      5 "Processos por CPU" \
+      6 "Processos por I/O" \
+      0 "Voltar")" || return 0
+
+    case "$option" in
+      1) shellops_tui_show_output "Visão geral de performance" performance_overview || true ;;
+      2) shellops_tui_performance_sampled "CPU por intervalo" performance_cpu_interval ;;
+      3) shellops_tui_performance_sampled "Memória / VMStat" performance_vmstat_interval ;;
+      4) shellops_tui_performance_sampled "I/O de discos" performance_disk_io ;;
+      5) shellops_tui_performance_sampled "Processos por CPU" performance_process_cpu ;;
+      6) shellops_tui_performance_sampled "Processos por I/O" performance_process_io ;;
+      0) return 0 ;;
+    esac
+  done
+}
+
+shellops_tui_diagnostics_services() {
+  local option
+
+  while true; do
+    option="$(dialog --stdout --title "Diagnósticos - Serviços e logs" --menu \
+      "Evidências para investigação de falhas" 19 88 8 \
+      1 "Serviços com falha" \
+      2 "Eventos warning até alert" \
+      3 "Journal por período" \
+      4 "Mensagens do kernel" \
+      0 "Voltar")" || return 0
+
+    case "$option" in
+      1) shellops_tui_show_output "Serviços com falha" services_failed || true ;;
+      2) shellops_tui_services_recent ;;
+      3) shellops_tui_services_period ;;
+      4) shellops_tui_services_kernel ;;
+      0) return 0 ;;
+    esac
+  done
+}
+
+shellops_tui_diagnostics_network() {
+  local option destination detailed
+
+  while true; do
+    option="$(dialog --stdout --title "Diagnósticos - Rede" --menu \
+      "Testes ativos e evidências de conectividade" 20 88 9 \
+      1 "Conectividade ICMP" \
+      2 "Conectividade TCP" \
+      3 "Rota até o destino" \
+      4 "Resolução detalhada de hostname" \
+      5 "Estatísticas de interfaces" \
+      0 "Voltar")" || return 0
+
+    case "$option" in
+      1) shellops_tui_network_ping ;;
+      2) shellops_tui_network_tcp ;;
+      3) shellops_tui_network_trace ;;
+      4)
+        destination="$(shellops_tui_network_target)" || continue
+        [[ -n "$destination" ]] || continue
+        detailed=1
+        shellops_tui_show_output "Resolução: $destination" \
+          network_resolve "$destination" "$detailed" || true
+        ;;
+      5) shellops_tui_network_stats ;;
+      0) return 0 ;;
+    esac
+  done
+}
+
+shellops_tui_diagnostics_docker() {
+  local container
+
+  container="$(shellops_tui_container_name)" || return 0
+  [[ -n "$container" ]] || return 0
+  shellops_tui_show_output "Health: $container" docker_show_health "$container" || true
+}
+
+shellops_tui_diagnostics_menu() {
+  local option
+
+  while true; do
+    option="$(dialog --stdout --title "Diagnósticos" --menu \
+      "Coletas, testes e correlação de evidências" 19 88 8 \
+      1 "Quick Health Check" \
+      2 "Performance" \
+      3 "Rede" \
+      4 "Serviços e logs" \
+      5 "Docker - status e healthcheck" \
+      0 "Voltar")" || return 0
+
+    case "$option" in
+      1) shellops_tui_show_output "Quick Health Check" health_quick_check || true ;;
+      2) shellops_tui_diagnostics_performance ;;
+      3) shellops_tui_diagnostics_network ;;
+      4) shellops_tui_diagnostics_services ;;
+      5) shellops_tui_diagnostics_docker ;;
+      0) return 0 ;;
+    esac
+  done
+}
+
+shellops_tui_read_performance() {
+  local option
+
+  while true; do
+    option="$(dialog --stdout --title "Consultas - Performance" --menu \
+      "Histórico e disponibilidade das ferramentas" 15 88 6 \
+      1 "Histórico SAR" \
+      2 "Disponibilidade do sysstat" \
+      0 "Voltar")" || return 0
+
+    case "$option" in
+      1) shellops_tui_performance_history ;;
+      2) shellops_tui_show_output "Disponibilidade do sysstat" performance_sysstat_status || true ;;
+      0) return 0 ;;
+    esac
+  done
+}
+
+shellops_tui_read_services() {
+  local option
+
+  while true; do
+    option="$(dialog --stdout --title "Consultas - Serviços e logs" --menu \
+      "Estado atual e leitura do journal" 18 88 8 \
+      1 "Status de um serviço" \
+      2 "Serviços em execução" \
+      3 "Serviços habilitados" \
+      4 "Journal de um serviço" \
+      0 "Voltar")" || return 0
+
+    case "$option" in
+      1) shellops_tui_services_status ;;
+      2) shellops_tui_show_output "Serviços em execução" services_running || true ;;
+      3) shellops_tui_show_output "Serviços habilitados" services_enabled || true ;;
+      4) shellops_tui_services_journal ;;
+      0) return 0 ;;
+    esac
+  done
+}
+
+shellops_tui_read_network() {
+  local option
+
+  while true; do
+    option="$(dialog --stdout --title "Consultas - Rede" --menu \
+      "Configuração, inventário e estado atual" 20 88 9 \
+      1 "Resumo de rede" \
+      2 "Interfaces" \
+      3 "Rotas" \
+      4 "Configuração DNS" \
+      5 "Portas e sockets" \
+      6 "ARP / Neighbor table" \
+      0 "Voltar")" || return 0
+
     case "$option" in
       1) shellops_tui_show_output "Resumo de rede" network_overview || true ;;
       2) shellops_tui_network_interfaces ;;
       3) shellops_tui_network_routes ;;
-      4) shellops_tui_network_dns ;;
+      4) shellops_tui_show_output "Configuração DNS" network_dns_status || true ;;
       5) shellops_tui_network_sockets ;;
-      6) shellops_tui_network_ping ;;
-      7) shellops_tui_network_tcp ;;
-      8) shellops_tui_network_trace ;;
-      9) shellops_tui_show_output "ARP / Neighbor table" network_neighbors || true ;;
-      10) shellops_tui_network_stats ;;
-      11) return 0 ;;
+      6) shellops_tui_show_output "ARP / Neighbor table" network_neighbors || true ;;
+      0) return 0 ;;
+    esac
+  done
+}
+
+shellops_tui_read_docker() {
+  local option container lines
+
+  while true; do
+    option="$(dialog --stdout --title "Consultas - Docker" --menu \
+      "Operações somente de leitura" 18 82 8 \
+      1 "Listar containers" \
+      2 "Stats atuais" \
+      3 "Logs de um container" \
+      4 "Inspect de um container" \
+      0 "Voltar")" || return 0
+
+    case "$option" in
+      1) shellops_tui_show_output "Containers Docker" docker_list_containers || true ;;
+      2) shellops_tui_show_output "Docker stats" docker_show_stats || true ;;
+      3)
+        container="$(shellops_tui_container_name)" || continue
+        [[ -n "$container" ]] || continue
+        lines="$(dialog --stdout --title "Docker logs" \
+          --inputbox "Quantidade de linhas:" 8 60 "200")" || continue
+        [[ -n "$lines" ]] || continue
+        shellops_tui_show_output "Logs: $container" docker_show_logs "$container" "$lines" || true
+        ;;
+      4)
+        container="$(shellops_tui_container_name)" || continue
+        [[ -n "$container" ]] || continue
+        shellops_tui_show_output "Inspect: $container" docker_inspect_container "$container" || true
+        ;;
+      0) return 0 ;;
+    esac
+  done
+}
+
+shellops_tui_read_menu() {
+  local option
+
+  while true; do
+    option="$(dialog --stdout --title "Consultas e leitura" --menu \
+      "Inventário e estado atual, sem alterações no servidor" 20 88 9 \
+      1 "Sistema" \
+      2 "Rede" \
+      3 "Serviços e logs" \
+      4 "Docker" \
+      5 "Histórico e dependências de performance" \
+      0 "Voltar")" || return 0
+
+    case "$option" in
+      1) shellops_tui_system ;;
+      2) shellops_tui_read_network ;;
+      3) shellops_tui_read_services ;;
+      4) shellops_tui_read_docker ;;
+      5) shellops_tui_read_performance ;;
+      0) return 0 ;;
     esac
   done
 }
@@ -485,31 +623,16 @@ shellops_tui_main() {
 
   while true; do
     option="$(dialog --stdout --clear --title "ShellOps" --menu \
-      "Administração e troubleshooting para servidores RHEL-based" 23 88 12 \
-      1 "Quick Health Check - somente leitura" \
-      2 "Validar certificado PEM" \
-      3 "Analisar performance de relatórios" \
-      4 "Docker - operações somente leitura" \
-      5 "Monitorar startup do TASY AppServer" \
-      6 "Diagnóstico do sistema - somente leitura" \
-      7 "Performance - somente leitura" \
-      8 "Serviços e Logs - somente leitura" \
-      9 "Rede - somente leitura" \
-      10 "Instalação [Operação de risco - indisponível]" \
-      11 "Manutenção [Operação de risco - indisponível]" \
+      "Administração e troubleshooting para servidores RHEL-based" 16 88 6 \
+      1 "Utilitários" \
+      2 "Diagnósticos" \
+      3 "Consultas e leitura" \
       0 "Sair")" || break
 
     case "$option" in
-      1) shellops_tui_show_output "Quick Health Check" health_quick_check || true ;;
-      2) shellops_tui_certificates ;;
-      3) shellops_tui_reports ;;
-      4) shellops_tui_docker ;;
-      5) shellops_tui_tasy_monitor ;;
-      6) shellops_tui_system ;;
-      7) shellops_tui_performance ;;
-      8) shellops_tui_services ;;
-      9) shellops_tui_network ;;
-      10|11) shellops_tui_unavailable ;;
+      1) shellops_tui_utilities_menu ;;
+      2) shellops_tui_diagnostics_menu ;;
+      3) shellops_tui_read_menu ;;
       0) break ;;
     esac
   done

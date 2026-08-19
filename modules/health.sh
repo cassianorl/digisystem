@@ -180,9 +180,9 @@ _health_memory_section() {
       awk -v p="$available_percent" -v l="$HEALTH_MEMORY_LOW_PERCENT" 'BEGIN {exit !(p >= l)}'; then
       _health_evidence INFO "Swap utilizada, sem evidência de paginação ativa nesta amostra."
     fi
-    _health_collection_status "Memória" "AVAILABLE"
+    _health_collection_status "Memoria" "AVAILABLE"
   else
-    _health_collection_status "Memória" "ERROR"
+    _health_collection_status "Memoria" "ERROR"
   fi
 }
 

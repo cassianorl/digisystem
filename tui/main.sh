@@ -628,7 +628,325 @@ shellops_tui_read_menu() {
   done
 }
 
-shellops_tui_main() {
+shellops_tui_not_available() {
+  local area="${1:-Funcionalidade}"
+  dialog --title "$area" --msgbox \
+    "[Em refatoração]\n\nNesta etapa, somente operações de CONSULTA já validadas estão ativas." 10 76
+}
+
+shellops_tui_select_target() {
+  local source_filter="${1:-}" records_output choice index
+  local source type name image state health pid metadata description
+  local -a records=() menu_items=()
+
+  records_output="$(discovery_records)"
+  [[ -n "$records_output" ]] || {
+    dialog --title "Selecionar alvo" --msgbox "Nenhum alvo foi detectado." 8 72
+    return 1
+  }
+  while IFS= read -r choice; do
+    IFS='|' read -r source type name image state health pid metadata <<< "$choice"
+    [[ -z "$source_filter" || "$source" == "$source_filter" ]] || continue
+    records+=("$choice")
+    index=$((${#records[@]} - 1))
+    description="[$source/$type] $name"
+    [[ -n "$state" ]] && description+=" — $state"
+    menu_items+=("$index" "$description")
+  done <<< "$records_output"
+  (( ${#records[@]} > 0 )) || {
+    dialog --title "Selecionar alvo" --msgbox "Nenhum alvo compatível foi detectado." 8 72
+    return 1
+  }
+  choice="$(dialog --stdout --title "Selecionar alvo" --menu \
+    "Selecione o componente que será analisado:" 23 104 15 "${menu_items[@]}")" || return 1
+  IFS='|' read -r source type name image state health pid metadata <<< "${records[$choice]}"
+  discovery_target_set "$source" "$type" "$name" "$image" "$state" "$health" "$pid" "$metadata"
+  dialog --title "Alvo selecionado" --msgbox \
+    "Source: $SHELLOPS_TARGET_SOURCE\nTipo: $SHELLOPS_TARGET_TYPE\nNome: $SHELLOPS_TARGET_NAME" 10 84
+}
+
+shellops_tui_diagnose_selected_target() {
+  [[ -n "$SHELLOPS_TARGET_SOURCE" ]] || shellops_tui_select_target || return 0
+  shellops_tui_show_output "Diagnóstico: $SHELLOPS_TARGET_NAME" discovery_diagnose_target || true
+}
+
+shellops_tui_diagnostic_menu_v1() {
+  local option
+  while true; do
+    option="$(dialog --stdout --title "Diagnóstico" --menu \
+      "Descoberta e diagnóstico genérico — CONSULTA" 18 90 8 \
+      1 "Detectar ambiente" 2 "Selecionar alvo" 3 "Diagnosticar alvo" \
+      4 "Quick Health Check" 5 "Voltar")" || return 0
+    case "$option" in
+      1) shellops_tui_show_output "Descoberta de ambiente" discovery_environment_summary || true ;;
+      2) shellops_tui_select_target || true ;;
+      3) shellops_tui_diagnose_selected_target ;;
+      4) shellops_tui_show_output "Quick Health Check" health_quick_check || true ;;
+      5) return 0 ;;
+    esac
+  done
+}
+
+shellops_tui_docker_container_action() {
+  local action="$1" lines
+  shellops_tui_select_target docker || return 0
+  case "$action" in
+    diagnose) shellops_tui_show_output "Diagnóstico: $SHELLOPS_TARGET_NAME" discovery_diagnose_target || true ;;
+    logs)
+      lines="$(dialog --stdout --title "Docker logs" --inputbox "Quantidade de linhas:" 8 60 "200")" || return 0
+      shellops_is_non_negative_integer "$lines" || {
+        dialog --title "Entrada inválida" --msgbox "A quantidade deve ser um inteiro." 8 70
+        return 0
+      }
+      shellops_tui_show_output "Logs: $SHELLOPS_TARGET_NAME" docker_show_logs "$SHELLOPS_TARGET_NAME" "$lines" || true
+      ;;
+    inspect) shellops_tui_show_output "Inspect seguro: $SHELLOPS_TARGET_NAME" docker_inspect_safe "$SHELLOPS_TARGET_NAME" || true ;;
+  esac
+}
+
+shellops_tui_docker_menu_v1() {
+  local option
+  while true; do
+    option="$(dialog --stdout --title "Docker / Containers" --menu \
+      "Inventário e análise somente de leitura" 22 94 12 \
+      1 "Containers em execução" 2 "Todos os containers" 3 "Imagens disponíveis" \
+      4 "Aplicações detectadas" 5 "Diagnosticar container" 6 "Logs" 7 "Stats" \
+      8 "Inspect seguro" 9 "Voltar")" || return 0
+    case "$option" in
+      1) shellops_tui_show_output "Containers em execução" docker_list_running_containers || true ;;
+      2) shellops_tui_show_output "Todos os containers" docker_list_all_containers || true ;;
+      3) shellops_tui_show_output "Imagens disponíveis" docker_list_images || true ;;
+      4) shellops_tui_show_output "Aplicações detectadas" docker_list_detected_applications || true ;;
+      5) shellops_tui_docker_container_action diagnose ;;
+      6) shellops_tui_docker_container_action logs ;;
+      7) shellops_tui_show_output "Docker stats" docker_show_stats || true ;;
+      8) shellops_tui_docker_container_action inspect ;;
+      9) return 0 ;;
+    esac
+  done
+}
+
+shellops_tui_storage_menu() {
+  local option
+  while true; do
+    option="$(dialog --stdout --title "Storage / LVM" --menu "Consultas de armazenamento" 17 82 8 \
+      1 "Filesystems" 2 "Inodes" 3 "Block devices" 4 "LVM" 5 "Voltar")" || return 0
+    case "$option" in
+      1) shellops_tui_show_output "Filesystems" system_filesystems || true ;;
+      2) shellops_tui_show_output "Inodes" system_inodes || true ;;
+      3) shellops_tui_show_output "Block devices" system_block_devices || true ;;
+      4) shellops_tui_show_output "LVM" system_lvm || true ;;
+      5) return 0 ;;
+    esac
+  done
+}
+
+shellops_tui_performance_menu_v1() {
+  local option
+  while true; do
+    option="$(dialog --stdout --title "Performance" --menu "Consultas e amostragens existentes" 15 88 6 \
+      1 "Coletas e amostragens" 2 "Histórico SAR e sysstat" 3 "Voltar")" || return 0
+    case "$option" in 1) shellops_tui_diagnostics_performance ;; 2) shellops_tui_read_performance ;; 3) return 0 ;; esac
+  done
+}
+
+shellops_tui_services_menu_v1() {
+  local option
+  while true; do
+    option="$(dialog --stdout --title "Serviços e Logs" --menu "Consultas existentes" 15 88 6 \
+      1 "Status e journal" 2 "Diagnóstico de falhas" 3 "Voltar")" || return 0
+    case "$option" in 1) shellops_tui_read_services ;; 2) shellops_tui_diagnostics_services ;; 3) return 0 ;; esac
+  done
+}
+
+shellops_tui_network_menu_v1() {
+  local option
+  while true; do
+    option="$(dialog --stdout --title "Rede" --menu "Consultas e testes existentes" 15 88 6 \
+      1 "Inventário e estado" 2 "Testes e diagnóstico" 3 "Voltar")" || return 0
+    case "$option" in 1) shellops_tui_read_network ;; 2) shellops_tui_diagnostics_network ;; 3) return 0 ;; esac
+  done
+}
+
+shellops_tui_linux_tools_menu() {
+  local option
+  while true; do
+    option="$(dialog --stdout --title "Ferramentas Linux" --menu \
+      "Funções genéricas preservadas como apoio operacional" 19 90 9 \
+      1 "Sistema" 2 "Performance" 3 "Serviços e Logs" 4 "Rede" \
+      5 "Storage / LVM" 6 "Voltar")" || return 0
+    case "$option" in
+      1) shellops_tui_system ;; 2) shellops_tui_performance_menu_v1 ;;
+      3) shellops_tui_services_menu_v1 ;; 4) shellops_tui_network_menu_v1 ;;
+      5) shellops_tui_storage_menu ;; 6) return 0 ;;
+    esac
+  done
+}
+
+shellops_tui_tasy_menu() {
+  local option
+  while true; do
+    option="$(dialog --stdout --title "TASY / AppManager" --menu "Recursos disponíveis nesta etapa" 16 90 7 \
+      1 "Monitorar startup do TASY AppServer [gera coleta]" \
+      2 "Instalação do AppManager [Em refatoração]" 3 "Voltar")" || return 0
+    case "$option" in 1) shellops_tui_tasy_monitor ;; 2) shellops_tui_not_available "Instalação do AppManager" ;; 3) return 0 ;; esac
+  done
+}
+
+_shellops_tui_logs_menu_stage1() {
+  local option
+  while true; do
+    option="$(dialog --stdout --title "Logs e Coletas" --menu "Consultas e coletas existentes" 16 90 7 \
+      1 "Analisar performance de relatórios" 2 "Serviços e journal" 3 "Voltar")" || return 0
+    case "$option" in 1) shellops_tui_reports ;; 2) shellops_tui_services_menu_v1 ;; 3) return 0 ;; esac
+  done
+}
+
+shellops_tui_log_lines() {
+  local lines
+  lines="$(dialog --stdout --title "Quantidade de linhas" \
+    --inputbox "Quantidade máxima de linhas:" 8 68 "200")" || return 1
+  [[ "$lines" =~ ^[1-9][0-9]*$ ]] || {
+    dialog --title "Entrada inválida" --msgbox "Informe um inteiro maior que zero." 8 68
+    return 2
+  }
+  printf '%s\n' "$lines"
+}
+
+shellops_tui_logs_tail() {
+  local log_file lines
+  log_file="$(shellops_tui_select_file "Selecionar arquivo de log")" || return 0
+  [[ -n "$log_file" ]] || return 0
+  lines="$(shellops_tui_log_lines)" || return 0
+  shellops_tui_show_output "Últimas linhas" logs_tail "$log_file" "$lines" || true
+}
+
+shellops_tui_logs_search_text() {
+  local log_file text limit
+  log_file="$(shellops_tui_select_file "Selecionar arquivo de log")" || return 0
+  [[ -n "$log_file" ]] || return 0
+  text="$(dialog --stdout --title "Busca literal" \
+    --inputbox "Texto a localizar (não é expressão regular):" 9 78)" || return 0
+  [[ -n "$text" ]] || return 0
+  limit="$(dialog --stdout --title "Limite" \
+    --inputbox "Máximo de resultados:" 8 66 "200")" || return 0
+  [[ "$limit" =~ ^[1-9][0-9]*$ ]] || {
+    dialog --title "Entrada inválida" --msgbox "Informe um limite inteiro maior que zero." 8 70
+    return 0
+  }
+  shellops_tui_show_output "Busca literal em log" logs_search_text "$log_file" "$text" "$limit" || true
+}
+
+shellops_tui_logs_common_errors() {
+  local log_file limit context
+  log_file="$(shellops_tui_select_file "Selecionar arquivo de log")" || return 0
+  [[ -n "$log_file" ]] || return 0
+  limit="$(dialog --stdout --title "Limite" \
+    --inputbox "Máximo de linhas por amostra:" 8 68 "40")" || return 0
+  [[ "$limit" =~ ^[1-9][0-9]*$ ]] || {
+    dialog --title "Entrada inválida" --msgbox "Informe um limite inteiro maior que zero." 8 70
+    return 0
+  }
+  context="$(dialog --stdout --title "Contexto" \
+    --inputbox "Linhas de contexto por ocorrência (0 a 5):" 8 70 "1")" || return 0
+  [[ "$context" =~ ^[0-5]$ ]] || {
+    dialog --title "Entrada inválida" --msgbox "O contexto deve estar entre zero e cinco." 8 70
+    return 0
+  }
+  shellops_tui_show_output "Evidências de erros comuns" logs_common_errors \
+    "$log_file" "$limit" "$context" || true
+}
+
+shellops_tui_logs_period() {
+  local log_file since until
+  log_file="$(shellops_tui_select_file "Selecionar arquivo de log")" || return 0
+  [[ -n "$log_file" ]] || return 0
+  since="$(dialog --stdout --title "Início" \
+    --inputbox "Timestamp inicial (YYYY-MM-DD HH:MM:SS):" 8 76)" || return 0
+  [[ -n "$since" ]] || return 0
+  until="$(dialog --stdout --title "Fim" \
+    --inputbox "Timestamp final (vazio = sem limite):" 8 76)" || return 0
+  shellops_tui_show_output "Log por período" logs_search_period "$log_file" "$since" "$until" || true
+}
+
+shellops_tui_logs_find_large() {
+  local start_dir minimum_mb limit
+  start_dir="$(dialog --stdout --title "Diretório inicial" --dselect "$PWD/" 14 90)" || return 0
+  [[ -n "$start_dir" ]] || return 0
+  minimum_mb="$(dialog --stdout --title "Tamanho mínimo" \
+    --inputbox "Tamanho mínimo em MiB:" 8 66 "100")" || return 0
+  limit="$(dialog --stdout --title "Limite" \
+    --inputbox "Máximo de arquivos exibidos:" 8 66 "30")" || return 0
+  shellops_tui_show_output "Logs e arquivos grandes" logs_find_large \
+    "$start_dir" "$minimum_mb" "$limit" || true
+}
+
+shellops_tui_logs_target() {
+  local lines since="" until=""
+  [[ -n "$SHELLOPS_TARGET_SOURCE" ]] || shellops_tui_select_target || return 0
+  lines="$(shellops_tui_log_lines)" || return 0
+  if [[ "$SHELLOPS_TARGET_SOURCE" == docker || "$SHELLOPS_TARGET_SOURCE" == systemd ]]; then
+    since="$(dialog --stdout --title "Período opcional" \
+      --inputbox "Since (vazio = últimas linhas; exemplos: 1h ou 2026-08-20 10:00:00):" 9 88)" || return 0
+  fi
+  if [[ "$SHELLOPS_TARGET_SOURCE" == systemd && -n "$since" ]]; then
+    until="$(dialog --stdout --title "Fim opcional" \
+      --inputbox "Until (vazio = agora):" 8 76)" || return 0
+  fi
+  shellops_tui_show_output "Logs: $SHELLOPS_TARGET_NAME" logs_target "$lines" "$since" "$until" || true
+}
+
+shellops_tui_support_bundle() {
+  local default_destination destination
+  default_destination="$(collections_default_destination)" || default_destination="$PWD"
+  destination="$(dialog --stdout --title "Destino da coleta" \
+    --dselect "$default_destination/" 14 90)" || return 0
+  [[ -n "$destination" ]] || return 0
+  dialog --title "Gerar coleta de suporte" --yesno \
+    "Será criado um arquivo .tar.gz em:\n\n$destination\n\nA coleta contém diagnósticos estruturados e metadados. Logs de aplicação, credenciais, Config.Env e arquivos de certificados não serão incluídos. Continuar?" \
+    15 88 || return 0
+  shellops_tui_show_program_output "Gerar coleta de suporte" \
+    collections_generate_support_bundle "$destination" || true
+}
+
+shellops_tui_logs_menu() {
+  local option
+  while true; do
+    option="$(dialog --stdout --title "Logs e Coletas" --menu \
+      "Leitura e coleta de evidências — CONSULTA" 23 94 13 \
+      1 "Últimas linhas de um log" \
+      2 "Buscar texto em log" \
+      3 "Buscar erros comuns" \
+      4 "Buscar por período" \
+      5 "Localizar logs grandes" \
+      6 "Logs de alvo selecionado" \
+      7 "Performance TasyReports" \
+      8 "Gerar coleta de suporte" \
+      9 "Voltar")" || return 0
+    case "$option" in
+      1) shellops_tui_logs_tail ;;
+      2) shellops_tui_logs_search_text ;;
+      3) shellops_tui_logs_common_errors ;;
+      4) shellops_tui_logs_period ;;
+      5) shellops_tui_logs_find_large ;;
+      6) shellops_tui_logs_target ;;
+      7) shellops_tui_reports ;;
+      8) shellops_tui_support_bundle ;;
+      9) return 0 ;;
+    esac
+  done
+}
+
+shellops_tui_certificates_menu() {
+  local option
+  while true; do
+    option="$(dialog --stdout --title "Certificados" --menu "Recursos disponíveis nesta etapa" 15 88 6 \
+      1 "Validar PEM padrão Philips" 2 "Conversões e inspeções [Em refatoração]" 3 "Voltar")" || return 0
+    case "$option" in 1) shellops_tui_certificates ;; 2) shellops_tui_not_available "Certificados" ;; 3) return 0 ;; esac
+  done
+}
+
+_shellops_tui_main_legacy() {
   local option
 
   trap shellops_tui_cleanup EXIT
@@ -645,6 +963,43 @@ shellops_tui_main() {
       1) shellops_tui_utilities_menu ;;
       2) shellops_tui_diagnostics_menu ;;
       3) shellops_tui_read_menu ;;
+      0) break ;;
+    esac
+  done
+
+  shellops_tui_cleanup
+  trap - EXIT
+  clear
+}
+
+shellops_tui_main() {
+  local option
+
+  trap shellops_tui_cleanup EXIT
+  while true; do
+    option="$(dialog --stdout --clear --title "ShellOps v1.0" --menu \
+      "Operações de suporte e troubleshooting — etapa estrutural" 23 92 13 \
+      1 "Diagnóstico" \
+      2 "TASY / AppManager" \
+      3 "Docker / Containers" \
+      4 "Java / Tomcat" \
+      5 "TIE / Integrações" \
+      6 "Oracle / Conectividade" \
+      7 "Logs e Coletas" \
+      8 "Certificados" \
+      9 "Ferramentas Linux" \
+      0 "Sair")" || break
+
+    case "$option" in
+      1) shellops_tui_diagnostic_menu_v1 ;;
+      2) shellops_tui_tasy_menu ;;
+      3) shellops_tui_docker_menu_v1 ;;
+      4) shellops_tui_not_available "Java / Tomcat" ;;
+      5) shellops_tui_not_available "TIE / Integrações" ;;
+      6) shellops_tui_not_available "Oracle / Conectividade" ;;
+      7) shellops_tui_logs_menu ;;
+      8) shellops_tui_certificates_menu ;;
+      9) shellops_tui_linux_tools_menu ;;
       0) break ;;
     esac
   done

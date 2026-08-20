@@ -10,6 +10,8 @@ while [[ -L "$shellops_source" ]]; do
 done
 SHELLOPS_ROOT="$(cd -P "$(dirname "$shellops_source")/.." && pwd)"
 export SHELLOPS_ROOT
+SHELLOPS_VERSION="1.0-dev"
+export SHELLOPS_VERSION
 unset shellops_source shellops_source_dir
 
 source "$SHELLOPS_ROOT/lib/common.sh"
@@ -20,10 +22,13 @@ source "$SHELLOPS_ROOT/modules/performance.sh"
 source "$SHELLOPS_ROOT/modules/services.sh"
 source "$SHELLOPS_ROOT/modules/network.sh"
 source "$SHELLOPS_ROOT/modules/docker.sh"
+source "$SHELLOPS_ROOT/modules/discovery.sh"
 source "$SHELLOPS_ROOT/modules/health.sh"
 source "$SHELLOPS_ROOT/modules/certificates.sh"
 source "$SHELLOPS_ROOT/modules/reports.sh"
 source "$SHELLOPS_ROOT/modules/tasy.sh"
+source "$SHELLOPS_ROOT/modules/logs.sh"
+source "$SHELLOPS_ROOT/modules/collections.sh"
 
 shellops_require_command dialog "A interface requer o pacote 'dialog'." || exit 1
 

@@ -126,10 +126,14 @@ services_journal() {
 }
 
 services_journal_period() {
-  local since="${1:-}" until="${2:-}" status
+  local since="${1:-}" until="${2:-}" unit="${3:-}" status
   local -a journal_args=(--no-pager --since "$since")
   [[ -n "$since" ]] || { printf 'O início do período é obrigatório.\n' >&2; return 2; }
   [[ -n "$until" ]] && journal_args+=(--until "$until")
+  if [[ -n "$unit" ]]; then
+    _services_validate_unit "$unit" || return
+    journal_args+=(-u "$unit")
+  fi
   _services_require_journalctl || return
   _services_journal_context
   journalctl "${journal_args[@]}"

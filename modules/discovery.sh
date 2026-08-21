@@ -26,6 +26,7 @@ discovery_classify_component() {
     *tasy*report*) printf 'tasy_reports\n' ;;
     *tasy*emr*) printf 'tasy_emr\n' ;;
     *tasy*schedul*) printf 'tasy_scheduler\n' ;;
+    *tasy*connector*) printf 'tasy_connector\n' ;;
     *tasy*interface*) printf 'tasy_interfaces\n' ;;
     *tasy*app*server*|*tasyappserver*) printf 'tasy_appserver\n' ;;
     *appmanager*|*app-manager*) printf 'appmanager\n' ;;
@@ -38,6 +39,10 @@ discovery_classify_component() {
     *kibana*) printf 'kibana\n' ;;
     *logstash*) printf 'logstash\n' ;;
     *keycloak*) printf 'keycloak\n' ;;
+    *tie*manager*|*manager*tie*) printf 'tie_manager\n' ;;
+    *tie*primary*|*primary*tie*) printf 'tie_primary\n' ;;
+    *tie*secondary*|*secondary*tie*) printf 'tie_secondary\n' ;;
+    *tie.service*|*/opt/philips/tie*|*/opt/tie*) printf 'tie_service\n' ;;
     *haproxy*) printf 'haproxy\n' ;;
     *keepalived*) printf 'keepalived\n' ;;
     *tomcat*|*catalina*) printf 'tomcat\n' ;;
@@ -65,7 +70,7 @@ discovery_docker_container_records() {
   local name image state health ports mounts compose_service compose_project type metadata
   local -a ids=()
 
-  shellops_docker_available >/dev/null 2>&1 || return 0
+  _docker_require_access >/dev/null 2>&1 || return 0
   if [[ "$scope" == running ]]; then
     ids_output="$(docker ps -q 2>/dev/null)" || return 0
   else
@@ -89,7 +94,7 @@ discovery_docker_container_records() {
 
 discovery_docker_image_records() {
   local repository tag image_id type
-  shellops_docker_available >/dev/null 2>&1 || return 0
+  _docker_require_access >/dev/null 2>&1 || return 0
 
   while IFS=$'\t' read -r repository tag image_id; do
     [[ -n "$image_id" ]] || continue
@@ -100,21 +105,33 @@ discovery_docker_image_records() {
 }
 
 discovery_process_records() {
-  local pid command arguments type name
-  shellops_has_command ps || return 0
+  local pid command arguments type name proc_file comm
+  local -A seen=()
 
-  while read -r pid command arguments; do
-    [[ -n "$pid" && -n "$command" ]] || continue
-    type=""
-    name="$command"
-    case "$(printf '%s %s' "$command" "$arguments" | tr '[:upper:]' '[:lower:]')" in
-      *tomcat*|*catalina*) type=tomcat; name="Tomcat ($command)" ;;
-      *appmanager*|*app-manager*) type=appmanager; name="AppManager ($command)" ;;
-      *java*) type=jvm; name="JVM ($command)" ;;
-    esac
-    [[ -n "$type" ]] || continue
-    _discovery_record process "$type" "$name" "" running none "$pid" "command=$command"
-  done < <(ps -eo pid=,comm=,args= 2>/dev/null)
+  if shellops_has_command ps; then
+    while read -r pid command arguments; do
+      [[ -n "$pid" && -n "$command" ]] || continue
+      type=""; name="$command"
+      case "$(printf '%s %s' "$command" "$arguments" | tr '[:upper:]' '[:lower:]')" in
+        *tasy*connector*) type=tasy_connector; name="Tasy Connector ($command)" ;;
+        *tasy*interface*) type=tasy_interfaces; name="Tasy Interfaces ($command)" ;;
+        *bifrost*backend*) type=bifrost_backend; name="Bifrost Backend ($command)" ;;
+        *bifrost*frontend*) type=bifrost_frontend; name="Bifrost Frontend ($command)" ;;
+        *bifrost*) type=bifrost_server; name="Bifrost Server ($command)" ;;
+        *tomcat*|*catalina*) type=tomcat; name="Tomcat ($command)" ;;
+        *appmanager*|*app-manager*) type=appmanager; name="AppManager ($command)" ;;
+        *java*) type=jvm; name="JVM ($command)" ;;
+      esac
+      [[ -n "$type" ]] || continue; seen["$pid"]=1
+      _discovery_record process "$type" "$name" "" running none "$pid" "command=$command"
+    done < <(ps -eo pid=,comm=,args= 2>/dev/null)
+  fi
+
+  for proc_file in /proc/[0-9]*/comm; do
+    [[ -r "$proc_file" ]] || continue; pid="${proc_file#/proc/}"; pid="${pid%/comm}"
+    [[ -z "${seen[$pid]:-}" ]] || continue; IFS= read -r comm < "$proc_file"
+    case "$comm" in java|java.bin) _discovery_record process jvm "JVM ($comm)" "" running none "$pid" "command=$comm" ;; esac
+  done
 }
 
 discovery_systemd_records() {
@@ -140,7 +157,13 @@ discovery_path_records() {
     /opt/philips
     /opt/philips/volumes
     /opt/philips/tie
+    /opt/philips/tie/apps
+    /opt/philips/tie/configs
+    /opt/philips/tie/volumes
     /opt/tie
+    /opt/tie/apps
+    /opt/tie/configs
+    /opt/tie/volumes
   )
 
   for path in "${paths[@]}"; do
@@ -221,14 +244,37 @@ discovery_target_describe() {
   [[ -n "$SHELLOPS_TARGET_HEALTH" ]] && printf 'health: %s\n' "$SHELLOPS_TARGET_HEALTH"
   [[ -n "$SHELLOPS_TARGET_PID" ]] && printf 'pid: %s\n' "$SHELLOPS_TARGET_PID"
   [[ -n "$SHELLOPS_TARGET_METADATA" ]] && printf 'metadata: %s\n' "$SHELLOPS_TARGET_METADATA"
+  return 0
 }
 
 discovery_diagnose_target() {
   discovery_target_describe || return 1
-  printf '\nDiagnóstico genérico disponível nesta etapa:\n'
+  printf '\nDiagnóstico roteado — CONSULTA:\n'
+  case "$SHELLOPS_TARGET_TYPE" in
+    appmanager)
+      tasy_appmanager_diagnose
+      return
+      ;;
+    tie_*|bifrost_*|rabbitmq|mongodb|elasticsearch|kibana|logstash|keycloak|tasy_interfaces|tasy_connector)
+      tie_status_summary
+      return
+      ;;
+    tasy_appserver|tasy_reports|tasy_emr|tasy_scheduler|haproxy|keepalived)
+      tasy_environment_summary
+      return
+      ;;
+    jvm|tomcat)
+      java_jvm_summary
+      return
+      ;;
+    oracle*)
+      oracle_client_summary
+      return
+      ;;
+  esac
   case "$SHELLOPS_TARGET_SOURCE" in
     docker)
-      docker_show_health "$SHELLOPS_TARGET_NAME"
+      docker_diagnose_container "$SHELLOPS_TARGET_NAME" "$SHELLOPS_TARGET_TYPE"
       ;;
     process)
       if shellops_has_command ps; then
@@ -239,10 +285,12 @@ discovery_diagnose_target() {
       services_status "$SHELLOPS_TARGET_NAME"
       ;;
     docker_image)
-      printf 'Imagem disponível localmente; ainda não há diagnóstico especializado.\n'
+      printf 'Tipo: %s\nOrigem: docker_image\nEstado: %s\nMetadados disponíveis: %s\nDiagnóstico especializado: N/A\n' \
+        "$SHELLOPS_TARGET_TYPE" "${SHELLOPS_TARGET_STATE:-N/A}" "${SHELLOPS_TARGET_METADATA:-N/A}"
       ;;
     path)
-      printf 'Path detectado; ainda não há diagnóstico especializado.\n'
+      printf 'Tipo: %s\nOrigem: path\nEstado: %s\nMetadados disponíveis: %s\nDiagnóstico especializado: N/A\n' \
+        "$SHELLOPS_TARGET_TYPE" "${SHELLOPS_TARGET_STATE:-N/A}" "${SHELLOPS_TARGET_METADATA:-N/A}"
       ;;
     *)
       printf 'Não há diagnóstico genérico aplicável ao tipo selecionado.\n'

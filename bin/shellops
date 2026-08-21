@@ -10,9 +10,27 @@ while [[ -L "$shellops_source" ]]; do
 done
 SHELLOPS_ROOT="$(cd -P "$(dirname "$shellops_source")/.." && pwd)"
 export SHELLOPS_ROOT
-SHELLOPS_VERSION="1.0-dev"
-export SHELLOPS_VERSION
 unset shellops_source shellops_source_dir
+
+source "$SHELLOPS_ROOT/lib/version.sh"
+
+case "${1:-}" in
+  --version)
+    printf 'ShellOps %s\n' "$SHELLOPS_VERSION"
+    exit 0
+    ;;
+  --help)
+    printf 'ShellOps %s\n' "$SHELLOPS_VERSION"
+    printf 'Uso: shellops [opção]\n\n'
+    printf '%s\n' 'Opções:' '  --help' '  --version'
+    exit 0
+    ;;
+  '') ;;
+  *)
+    printf 'FAILED — opção desconhecida: %s\nUse: shellops --help\n' "$1" >&2
+    exit 2
+    ;;
+esac
 
 source "$SHELLOPS_ROOT/lib/common.sh"
 source "$SHELLOPS_ROOT/lib/dependencies.sh"
@@ -28,6 +46,9 @@ source "$SHELLOPS_ROOT/modules/certificates.sh"
 source "$SHELLOPS_ROOT/modules/reports.sh"
 source "$SHELLOPS_ROOT/modules/tasy.sh"
 source "$SHELLOPS_ROOT/modules/logs.sh"
+source "$SHELLOPS_ROOT/modules/tie.sh"
+source "$SHELLOPS_ROOT/modules/java.sh"
+source "$SHELLOPS_ROOT/modules/oracle.sh"
 source "$SHELLOPS_ROOT/modules/collections.sh"
 
 shellops_require_command dialog "A interface requer o pacote 'dialog'." || exit 1

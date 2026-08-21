@@ -42,7 +42,8 @@ _collections_run() {
 _collections_security_barrier() {
   local forbidden_file suspicious_file
   forbidden_file="$(find "$SHELLOPS_COLLECTION_ROOT" -type f \
-    \( -iname '*.pem' -o -iname '*.key' -o -iname '*.pfx' -o -iname '*.p12' \
+    \( -iname '*.pem' -o -iname '*.crt' -o -iname '*.cer' -o -iname '*.der' \
+       -o -iname '*.key' -o -iname '*.pfx' -o -iname '*.p12' -o -iname '*.pkcs12' \
        -o -iname '*.jks' -o -iname '*credential*' -o -iname '*secret*' \) -print -quit 2>/dev/null)"
   [[ -z "$forbidden_file" ]] || {
     shellops_error "Barreira de segurança: arquivo de tipo proibido encontrado na coleta."
@@ -60,7 +61,7 @@ _collections_security_barrier() {
 
 collections_generate_support_bundle() (
   local destination="${1:-}" temp_dir bundle_dir hostname_value timestamp bundle_name final_path
-  local started_at finished_at executor version result
+  local started_at finished_at executor version result docker_status_output docker_status
   local -a SHELLOPS_COLLECTION_RESULTS=() SHELLOPS_COLLECTION_FAILURES=()
 
   [[ -n "$destination" && -d "$destination" && -w "$destination" ]] || {
@@ -70,7 +71,8 @@ collections_generate_support_bundle() (
   shellops_require_commands mktemp mkdir dirname date hostname tar find grep head tail tr || return
 
   temp_dir="$(mktemp -d)" || { shellops_error "Não foi possível criar diretório temporário."; return 1; }
-  trap 'rm -rf -- "$temp_dir"' EXIT HUP INT TERM
+  trap 'rm -rf -- "$temp_dir"' EXIT
+  trap 'exit 130' HUP INT TERM
   hostname_value="$(hostname -s 2>/dev/null || hostname 2>/dev/null || printf host)"
   hostname_value="$(printf '%s' "$hostname_value" | tr -cd '[:alnum:]_.-')"
   hostname_value="${hostname_value:-host}"
@@ -85,7 +87,7 @@ collections_generate_support_bundle() (
   mkdir -p -- "$bundle_dir"/{health,system,services,network,docker,logs} || return 1
   started_at="$(date '+%Y-%m-%d %H:%M:%S %z')"
   executor="${USER:-${LOGNAME:-desconhecido}}"
-  version="${SHELLOPS_VERSION:-1.0-dev}"
+  version="${SHELLOPS_VERSION:-N/A}"
 
   _collections_run health/quick-health.txt health health_quick_check
   _collections_run system/summary.txt system-summary system_server_summary
@@ -101,15 +103,21 @@ collections_generate_support_bundle() (
   _collections_run network/dns.txt network-dns network_dns_status
   _collections_run network/sockets.txt network-sockets network_sockets summary
 
-  if shellops_docker_available >/dev/null 2>&1; then
+  if docker_status_output="$(docker_access_status 2>&1)"; then
     _collections_run docker/containers.txt docker-containers docker_list_all_containers
     _collections_run docker/images.txt docker-images docker_list_images
     _collections_run docker/system-df.txt docker-system-df docker_system_df
     _collections_run docker/health.txt docker-health docker_health_inventory
   else
-    SHELLOPS_COLLECTION_RESULTS+=("Docker: UNAVAILABLE")
-    SHELLOPS_COLLECTION_FAILURES+=("Docker indisponível")
-    printf 'Docker não está instalado, não está no PATH ou não pôde ser consultado.\n' > "$bundle_dir/docker/UNAVAILABLE.txt"
+    docker_status=$?
+    if [[ "$docker_status" -eq 127 ]]; then
+      SHELLOPS_COLLECTION_RESULTS+=("Docker: UNAVAILABLE")
+      SHELLOPS_COLLECTION_FAILURES+=("Docker indisponível")
+    else
+      SHELLOPS_COLLECTION_RESULTS+=("Docker daemon: NOT ACCESSIBLE")
+      SHELLOPS_COLLECTION_FAILURES+=("Docker daemon inacessível")
+    fi
+    printf '%s\n' "$docker_status_output" > "$bundle_dir/docker/UNAVAILABLE.txt"
   fi
 
   printf '%s\n' \

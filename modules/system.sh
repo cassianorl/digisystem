@@ -242,3 +242,29 @@ system_lvm() {
   fi
   return "$status"
 }
+
+system_locale_time_ntp() {
+  local locale_value lang_value lc_all_value timezone current_time ntp synchronization source stratum
+  locale_value="$(locale 2>/dev/null | awk -F= '$1=="LANG" {gsub(/"/,"",$2); print $2; exit}')"
+  lang_value="${LANG:-${locale_value:-N/A}}"
+  lc_all_value="${LC_ALL:-N/A}"
+  timezone="$(timedatectl show -p Timezone --value 2>/dev/null || true)"
+  [[ -n "$timezone" ]] || timezone="$(date +%Z 2>/dev/null || printf N/A)"
+  current_time="$(date '+%Y-%m-%d %H:%M:%S %z' 2>/dev/null || printf N/A)"
+  ntp=N/A; synchronization=N/A; source=N/A; stratum=N/A
+  if shellops_has_command timedatectl; then
+    ntp="$(timedatectl show -p NTP --value 2>/dev/null || printf N/A)"
+    synchronization="$(timedatectl show -p NTPSynchronized --value 2>/dev/null || printf N/A)"
+  fi
+  if shellops_has_command chronyc; then
+    source="$(chronyc tracking 2>/dev/null | awk -F: '/Reference ID/ {sub(/^[[:space:]]*/,"",$2); print $2; exit}')"
+    stratum="$(chronyc tracking 2>/dev/null | awk -F: '/Stratum/ {gsub(/[[:space:]]/,"",$2); print $2; exit}')"
+    [[ -n "$source" ]] || source=N/A; [[ -n "$stratum" ]] || stratum=N/A
+    ntp=Chrony
+  elif shellops_has_command systemctl && systemctl is-active --quiet chronyd 2>/dev/null; then
+    ntp='Chrony ativo; chronyc indisponível'
+  fi
+  printf 'Locale: %s\nLANG: %s\nLC_ALL: %s\nTimezone: %s\nCurrent time: %s\nNTP/Chrony: %s\nSynchronization: %s\nSource: %s\nStratum: %s\n' \
+    "${locale_value:-N/A}" "$lang_value" "$lc_all_value" "$timezone" "$current_time" "$ntp" "$synchronization" "$source" "$stratum"
+  printf '\nCONSULTA — nenhuma configuração de locale, timezone ou NTP foi alterada.\n'
+}

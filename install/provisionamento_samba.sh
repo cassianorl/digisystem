@@ -38,7 +38,8 @@ SHARE_PATH=$(ask "Caminho do diretório a exportar" "/anexos")
 
 SMB_GROUP=$(ask "Grupo POSIX para controlar acesso" "sambagrp")
 SMB_USER=$(ask "Usuário SMB local" "samba")
-SMB_PASSWD=$(ask "Senha do usuário SMB (deixe vazio para usar o nome do usuário)" "")
+read -rsp "Senha do usuário SMB (deixe vazio para usar o nome do usuário): " SMB_PASSWD || true
+printf '\n'
 
 DOMAIN_ALIAS=$(ask "Domínio lógico aceito pelo TASY (p/ login tipo DOMINIO;usuario:senha)" "$WORKGROUP")
 OPEN_FIREWALL=$(ask "Liberar portas no firewalld (se ativo)? (yes/no)" "yes")
@@ -172,7 +173,7 @@ if pdbedit -L -u "${SMB_USER}" >/dev/null 2>&1; then
 fi
 
 if printf '%s\n%s\n' "$FINAL_PASS" "$FINAL_PASS" | smbpasswd -a -s "${SMB_USER}" >/dev/null 2>&1; then
-  ok "Senha SMB definida para '${SMB_USER}' (senha: '${FINAL_PASS}')."
+  ok "Senha SMB definida para '${SMB_USER}'."
 else
   warn "Falha ao definir senha automaticamente. Será necessário digitar manualmente."
   smbpasswd -a "${SMB_USER}"
@@ -204,11 +205,12 @@ systemctl restart nmb || true
 systemctl --no-pager -l status smb | sed -n '1,12p' || true
 
 # ---------- teste ----------
-step "Teste rápido com smbclient (substitua <senha> se você alterou no prompt)"
+unset SMB_PASSWD FINAL_PASS
+step "Teste rápido com smbclient (a senha será solicitada interativamente)"
 if [[ -n "${IPADDR:-}" ]]; then
-  echo "  smbclient //${IPADDR}/${SHARE_NAME} -U \"${DOMAIN_ALIAS}\\\\${SMB_USER}\"%${FINAL_PASS} -c 'ls'"
+  echo "  smbclient //${IPADDR}/${SHARE_NAME} -U \"${DOMAIN_ALIAS}\\\\${SMB_USER}\" -c 'ls'"
 else
-  echo "  smbclient //<IP>/${SHARE_NAME} -U \"${DOMAIN_ALIAS}\\\\${SMB_USER}\"%${FINAL_PASS} -c 'ls'"
+  echo "  smbclient //<IP>/${SHARE_NAME} -U \"${DOMAIN_ALIAS}\\\\${SMB_USER}\" -c 'ls'"
 fi
 
 ok "Provisionamento finalizado.
@@ -216,6 +218,4 @@ Backups: /root/samba-backup-${STAMP}
 Share:   //${IPADDR:-IP_DO_SERVIDOR}/${SHARE_NAME}
 Caminho: ${SHARE_PATH}
 Usuário: ${DOMAIN_ALIAS}\\${SMB_USER}  (mapeado para local '${SMB_USER}')
-Senha:   '${FINAL_PASS}' (a menos que você a tenha alterado no prompt)
-
-Parametro 185:${DOMAIN_ALIAS};${SMB_USER}:${FINAL_PASS}"
+Senha:   definida no banco do Samba e não exibida pelo ShellOps."
